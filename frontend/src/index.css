@@ -1,0 +1,84 @@
+@import "tailwindcss/base";
+@import "tailwindcss/components";
+@import "tailwindcss/utilities";
+
+@layer base {
+  body {
+    @apply bg-cyber-bg text-cyber-text font-sans antialiased;
+    margin: 0;
+    overflow-x: hidden;
+  }
+}
+
+@layer components {
+  /* Scrollbar Styling */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    @apply bg-cyber-bg;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-cyber-border rounded hover:bg-cyber-accent hover:shadow-cyber transition-all;
+  }
+
+  /* Glassmorphism Panel */
+  .cyber-panel {
+    @apply bg-cyber-surface/80 backdrop-blur-md border border-cyber-border rounded-xl shadow-lg;
+  }
+
+  /* Cyber Button */
+  .cyber-btn {
+    @apply px-4 py-2 font-mono text-sm font-semibold tracking-wider rounded border transition-all duration-300 relative overflow-hidden;
+  }
+  
+  .cyber-btn-accent {
+    @apply text-cyber-accent border-cyber-accent hover:bg-cyber-accent/10 hover:shadow-cyber focus:outline-none focus:ring-1 focus:ring-cyber-accent focus:ring-offset-1 focus:ring-offset-cyber-bg;
+  }
+
+  .cyber-btn-red {
+    @apply text-cyber-red border-cyber-red hover:bg-cyber-red/10 hover:shadow-cyber-red focus:outline-none focus:ring-1 focus:ring-cyber-red focus:ring-offset-1 focus:ring-offset-cyber-bg;
+  }
+
+  /* Glitch Text Effect */
+  .text-glitch {
+    position: relative;
+    display: inline-block;
+  }
+  .text-glitch::before,
+  .text-glitch::after {
+    content: attr(data-text);
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0.8;
+  }
+  .text-glitch::before {
+    left: 2px;
+    text-shadow: -1px 0 #ff3366;
+    animation: "glitch-anim-1 2s infinite linear alternate-reverse";
+  }
+  .text-glitch::after {
+    left: -2px;
+    text-shadow: -1px 0 #00d4ff;
+    animation: "glitch-anim-2 3s infinite linear alternate-reverse";
+  }
+}
+
+/* React Flow Theming */
+.react-flow {
+  @apply bg-cyber-bg;
+}
+.react-flow__node {
+  @apply border-transparent;
+}
+.react-flow__handle {
+  @apply w-2 h-2 rounded-full border-none pointer-events-none;
+}
+.react-flow__edge-path {
+  stroke: #1e2d4a;
+  stroke-width: 2;
+}

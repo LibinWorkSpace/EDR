@@ -4,6 +4,7 @@ import telemetryRouter from "./routes/telemetry";
 import processTreeRouter from "./routes/processTree";
 import detectionRouter from "./routes/detection";
 import responseRouter from "./routes/response";
+import retirementRouter from "./routes/retirement";
 
 const app = express();
 const PORT = 3001;
@@ -17,6 +18,7 @@ app.use("/api/telemetry", telemetryRouter);
 app.use("/api/process-tree", processTreeRouter);
 app.use("/api/detection", detectionRouter);
 app.use("/api/response", responseRouter);
+app.use("/api/retirement", retirementRouter);
 
 // ── Health Check ───────────────────────────────────────────────────────────
 app.get("/health", (_req, res) => {
@@ -30,7 +32,8 @@ app.listen(PORT, () => {
   console.log(`   SSE Stream : GET  /api/telemetry/stream`);
   console.log(`   Process Tree: GET /api/process-tree`);
   console.log(`   Detection  : GET  /api/detection`);
-  console.log(`   Response   : POST /api/response/action\n`);
+  console.log(`   Response   : POST /api/response/action`);
+  console.log(`   Retirement : GET  /api/retirement\n`);
 });
 
 export default app;

@@ -87,24 +87,25 @@ function computeAnomalyScore(
 
 // ── Route ─────────────────────────────────────────────────────────────────────
 
-/**
- * GET /api/detection
- * Returns feature engineering results and anomaly detection for each process tree.
- */
+// GET /api/detection - Anomaly detection results
 router.get("/", (_req: Request, res: Response) => {
   const results = globalStore.trees.map((tree) => {
     const nodes = flattenTree(tree.root);
     const tree_depth = getDepth(tree.root);
     const execution_breadth = Math.max(...nodes.map((n) => (n.children?.length ?? 0)), 0);
     
-    // Add small random jitter (±0.02) to simulate live data computation on CLI entropy
-    const base_cli = avgCLIEntropy(nodes);
-    const jitter = (Math.random() - 0.5) * 0.04;
-    const cli_entropy = parseFloat(Math.max(0, base_cli + jitter).toFixed(3));
+    // Add controlled variation based on tree growth and time
+    const treeAge = Date.now() - new Date(tree.root.timestamp).getTime();
+    const growthFactor = Math.sin(treeAge / 30000) * 0.1; // Slow oscillation over 30 seconds
     
-    // Jitter temporal rate ±2 eps
-    const base_rate = temporalRateMs(nodes);
-    const temporal_rate = Math.max(0, parseFloat((base_rate + (Math.random() * 4 - 2)).toFixed(2)));
+    // CLI entropy with controlled variation
+    const base_cli = avgCLIEntropy(nodes);
+    const cli_entropy = parseFloat(Math.max(0, base_cli + growthFactor).toFixed(3));
+    
+    // Temporal rate with controlled variation based on tree activity
+    const base_temporal = temporalRateMs(nodes);
+    const temporal_variation = Math.cos(treeAge / 20000) * 2; // Oscillates ±2
+    const temporal_rate = Math.max(0, parseFloat((base_temporal + temporal_variation).toFixed(2)));
     
     const has_privilege_transition = privilegeTransition(nodes);
     const anomaly_score = Number(computeAnomalyScore(
@@ -115,7 +116,15 @@ router.get("/", (_req: Request, res: Response) => {
       has_privilege_transition
     ).toFixed(3));
     
-    const is_anomalous = anomaly_score >= 0.55; // Lowered threshold for more dynamic demo flow
+    // Stable threshold with hysteresis to prevent flapping
+    const threshold = 0.75;
+    const hysteresis = 0.02; // 2% hysteresis band
+    
+    // Check if tree was previously anomalous (simple state tracking)
+    const wasAnomalous = tree.is_suspicious || anomaly_score > (threshold + hysteresis);
+    const is_anomalous = wasAnomalous ? 
+      anomaly_score >= (threshold - hysteresis) : // Higher threshold to become normal
+      anomaly_score >= (threshold + hysteresis);  // Lower threshold to become anomalous
 
     return {
       tree_id: tree.tree_id,
@@ -130,10 +139,82 @@ router.get("/", (_req: Request, res: Response) => {
       },
       anomaly_score,
       is_anomalous,
+      threshold_used: wasAnomalous ? (threshold - hysteresis) : (threshold + hysteresis)
     };
   });
 
-  res.json({ detections: results });
+  res.json({ detections: results, version: globalStore.version });
+});
+
+// GET /api/detection/stream - SSE stream for real-time detection updates
+router.get("/stream", (_req: Request, res: Response) => {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Cache-Control'
+  });
+
+  const sendDetections = () => {
+    const results = globalStore.trees.map((tree) => {
+      const nodes = flattenTree(tree.root);
+      const tree_depth = getDepth(tree.root);
+      const execution_breadth = Math.max(...nodes.map((n) => (n.children?.length ?? 0)), 0);
+      
+      // Add controlled variation based on tree growth and time
+      const treeAge = Date.now() - new Date(tree.root.timestamp).getTime();
+      const growthFactor = Math.sin(treeAge / 30000) * 0.1; // Slow oscillation over 30 seconds
+      
+      // CLI entropy with controlled variation
+      const base_cli = avgCLIEntropy(nodes);
+      const cli_entropy = parseFloat(Math.max(0, base_cli + growthFactor).toFixed(3));
+      
+      // Temporal rate with controlled variation based on tree activity
+      const base_temporal = temporalRateMs(nodes);
+      const temporal_variation = Math.cos(treeAge / 20000) * 2; // Oscillates ±2
+      const temporal_rate = Math.max(0, parseFloat((base_temporal + temporal_variation).toFixed(2)));
+      
+      const has_privilege_transition = privilegeTransition(nodes);
+      const anomaly_score = Number(computeAnomalyScore(
+        tree_depth,
+        execution_breadth,
+        cli_entropy,
+        temporal_rate,
+        has_privilege_transition
+      ).toFixed(3));
+      
+      const is_anomalous = anomaly_score >= 0.75;
+
+      return {
+        tree_id: tree.tree_id,
+        label: tree.label,
+        root_pid: tree.root.pid,
+        features: {
+          tree_depth,
+          execution_breadth,
+          cli_entropy,
+          temporal_rate_ms: temporal_rate,
+          privilege_transition: has_privilege_transition,
+        },
+        anomaly_score,
+        is_anomalous,
+      };
+    });
+
+    res.write(`data: ${JSON.stringify({ detections: results, timestamp: new Date().toISOString() })}\n\n`);
+  };
+
+  // Send initial data
+  sendDetections();
+
+  // Send updates every 2 seconds
+  const interval = setInterval(sendDetections, 2000);
+
+  // Cleanup on client disconnect
+  req.on('close', () => {
+    clearInterval(interval);
+  });
 });
 
 export default router;

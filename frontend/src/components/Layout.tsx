@@ -56,10 +56,14 @@ const TopBar = () => {
   const { isStreaming, setStreaming, alerts } = useEDRStore();
   const [time, setTime] = useState(new Date().toISOString());
 
-  // SSE Management
+  // SSE Management and Global Data Sync
   useEffect(() => {
     let eventSource: EventSource | null = null;
+    let retirementsEventSource: EventSource | null = null;
+    let syncInterval: any = null;
+    
     if (isStreaming) {
+      // Start telemetry SSE
       eventSource = new EventSource("/api/telemetry/stream");
       eventSource.onmessage = (event) => {
         const data = JSON.parse(event.data);
@@ -70,11 +74,158 @@ const TopBar = () => {
         eventSource?.close();
         setStreaming(false);
       };
+
+      // Retirement stream for immediate alert archival
+      retirementsEventSource = new EventSource("/api/retirement/stream");
+      retirementsEventSource.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'retirement') {
+          console.log(`[Global SSE] Tree retired: ${data.event.tree_id} (${data.event.reason})`);
+          
+          // Immediately archive any alerts for this retired tree
+          const currentAlerts = useEDRStore.getState().alerts;
+          const { archiveAlert } = useEDRStore.getState();
+          currentAlerts.forEach(alert => {
+            if (!alert.resolved && alert.tree_id === data.event.tree_id) {
+              console.log(`[Global SSE] Archiving alert for retired tree: ${alert.tree_id}`);
+              archiveAlert(alert.id);
+            }
+          });
+        }
+      };
+
+      retirementsEventSource.onerror = (error) => {
+        console.error("Retirement SSE error:", error);
+        retirementsEventSource?.close();
+      };
+
+      // Enhanced global sync for all components - centralized alert management
+      const syncAllData = async () => {
+        try {
+          // Fetch process trees for global count
+          const treesResponse = await fetch("/api/process-tree");
+          if (treesResponse.ok) {
+            const data = await treesResponse.json();
+            // Extract trees array from response object
+            const trees = data.trees || [];
+            if (Array.isArray(trees)) {
+              useEDRStore.getState().setProcessTrees(trees);
+            }
+          }
+
+          // Fetch detections for comprehensive alert sync
+          const detectionsResponse = await fetch("/api/detection");
+          if (detectionsResponse.ok) {
+            const data = await detectionsResponse.json();
+            // Extract detections array from response object
+            const detections = data.detections || [];
+            
+            if (Array.isArray(detections)) {
+              // Get current state
+              const currentAlerts = useEDRStore.getState().alerts;
+              const { addAlert, dismissAlert, archiveAlert, cleanupOldAlerts } = useEDRStore.getState();
+              
+              // 1. Handle tree retirements FIRST - fetch retirements
+              try {
+                const retirementsResponse = await fetch("/api/retirement");
+                if (retirementsResponse.ok) {
+                  const retirementsData = await retirementsResponse.json();
+                  const retirements = Array.isArray(retirementsData) ? retirementsData : [];
+                  const retiredTreeIds = new Set(retirements.map((r: any) => r.tree_id));
+                  
+                  // Archive alerts for retired trees immediately
+                  const alertsToArchive: string[] = [];
+                  currentAlerts.forEach(alert => {
+                    if (!alert.resolved && retiredTreeIds.has(alert.tree_id)) {
+                      alertsToArchive.push(alert.id);
+                    }
+                  });
+                  alertsToArchive.forEach(alertId => archiveAlert(alertId));
+                }
+              } catch (err) {
+                console.error("Failed to fetch retirements:", err);
+              }
+
+              // Get updated alerts after potential archival
+              const updatedAlerts = useEDRStore.getState().alerts;
+              
+              // 2. Handle Additions/Updates - add new alerts for anomalous detections
+              detections.forEach((det: any) => {
+                if (det.is_anomalous) {
+                  const existingAlert = updatedAlerts.find(a => a.tree_id === det.tree_id);
+                  if (!existingAlert) {
+                    addAlert({
+                      id: `alert-${det.tree_id}-${Date.now()}`,
+                      tree_id: det.tree_id,
+                      label: det.label,
+                      pid: det.root_pid,
+                      anomaly_score: det.anomaly_score,
+                      timestamp: new Date().toISOString(),
+                      severity: det.anomaly_score > 0.8 ? "CRITICAL" : "HIGH",
+                      resolved: false,
+                    });
+                  }
+                }
+              });
+
+              // 3. Handle Removals - dismiss/archive alerts for trees no longer anomalous
+              const activeTreeIds = new Set(detections.map((d: any) => d.tree_id));
+              const finalAlerts = useEDRStore.getState().alerts;
+              
+              finalAlerts.forEach(alert => {
+                if (!alert.resolved) {
+                  // Check if tree still exists in current detections
+                  if (!activeTreeIds.has(alert.tree_id)) {
+                    // Tree completely gone from backend - archive immediately
+                    archiveAlert(alert.id);
+                  } else {
+                    // Tree exists - check if still anomalous
+                    const stillAnomalous = detections.find((d: any) => d.tree_id === alert.tree_id && d.is_anomalous);
+                    if (!stillAnomalous) {
+                      // Tree exists but no longer anomalous - dismiss (mark resolved)
+                      dismissAlert(alert.id);
+                    }
+                  }
+                }
+              });
+
+              // 4. Periodic cleanup of old resolved alerts
+              if (Math.random() < 0.1) { // 10% chance each sync cycle
+                cleanupOldAlerts(600000); // Remove resolved alerts older than 10 minutes
+              }
+            }
+          }
+        } catch (error) {
+          console.error("Global sync error:", error);
+        }
+      };
+
+      // Initial sync
+      syncAllData();
+      
+      // Set up interval for continuous sync
+      syncInterval = setInterval(syncAllData, 2000);
+      
     } else {
+      // Clear data when streaming stops
       useEDRStore.getState().setEvents([]);
+      useEDRStore.getState().setProcessTrees([]);
+      
+      // Clear active alerts but keep resolved ones
+      const currentAlerts = useEDRStore.getState().alerts;
+      currentAlerts.forEach(alert => {
+        if (!alert.resolved) {
+          useEDRStore.getState().dismissAlert(alert.id);
+        }
+      });
     }
+
     return () => {
       eventSource?.close();
+      retirementsEventSource?.close();
+      if (syncInterval) {
+        clearInterval(syncInterval);
+      }
     };
   }, [isStreaming, setStreaming]);
 
@@ -84,6 +235,11 @@ const TopBar = () => {
   }, []);
 
   const activeAlerts = alerts.filter((a) => !a.resolved).length;
+
+  // Debug logging for alert count changes
+  useEffect(() => {
+    console.log(`[TopBar] Active alerts count: ${activeAlerts}`);
+  }, [activeAlerts]);
 
   return (
     <div className="h-16 w-full bg-cyber-card border-b border-cyber-border flex items-center justify-between px-6 shadow-md z-10">

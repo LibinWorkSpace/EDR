@@ -19,6 +19,8 @@ interface EDRState {
   addAlert: (alert: Alert) => void;
   removeAlert: (id: string) => void;
   dismissAlert: (id: string) => void;
+  archiveAlert: (id: string) => void;
+  cleanupOldAlerts: (maxAge?: number) => void;
   // Response Log
   actionLog: ActionLog[];
   addAction: (action: ActionLog) => void;
@@ -33,7 +35,7 @@ export const useEDRStore = create<EDRState>((set) => ({
   setEvents: (events) => set({ events }),
 
   processTrees: [],
-  setProcessTrees: (trees) => set({ processTrees: trees }),
+  setProcessTrees: (trees) => set({ processTrees: Array.isArray(trees) ? trees : [] }),
   activeTree: null,
   setActiveTree: (id) => set({ activeTree: id }),
 
@@ -47,6 +49,27 @@ export const useEDRStore = create<EDRState>((set) => ({
     set((state) => ({
       alerts: state.alerts.map((a) => (a.id === id ? { ...a, resolved: true } : a)),
     })),
+  archiveAlert: (id) => set((state) => {
+    const alertToArchive = state.alerts.find(a => a.id === id);
+    if (alertToArchive) {
+      console.log(`[EDR] Archiving alert: ${alertToArchive.tree_id} (${alertToArchive.label})`);
+    }
+    return { alerts: state.alerts.filter(a => a.id !== id) };
+  }),
+  cleanupOldAlerts: (maxAge = 600000) => // 10 minutes default
+    set((state) => {
+      const before = state.alerts.length;
+      const filtered = state.alerts.filter(a => {
+        if (!a.resolved) return true; // Keep unresolved alerts
+        const alertAge = Date.now() - new Date(a.timestamp).getTime();
+        return alertAge < maxAge; // Remove old resolved alerts
+      });
+      const cleaned = before - filtered.length;
+      if (cleaned > 0) {
+        console.log(`[EDR] Cleaned up ${cleaned} old resolved alerts`);
+      }
+      return { alerts: filtered };
+    }),
 
   actionLog: [],
   addAction: (action) => set((state) => ({ actionLog: [action, ...state.actionLog] })),

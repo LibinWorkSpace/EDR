@@ -14,7 +14,7 @@ export default {
           red: "#ff3366",
           yellow: "#ffcc00",
           purple: "#8b5cf6",
-          text: "#c9d1e0",
+          text: "#e2e8f0",
         },
       },
       fontFamily: {

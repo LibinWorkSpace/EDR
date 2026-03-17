@@ -7,6 +7,8 @@ export const edrEvents = new EventEmitter();
 // Initial state starts empty so the background generator can populate it dynamically
 export const globalStore = {
   trees: [] as ProcessTree[],
+  version: 0,
+  lastUpdate: new Date().toISOString(),
 };
 
 /**
@@ -28,6 +30,10 @@ export const killProcess = (pid: number) => {
   };
 
   globalStore.trees.forEach(t => prune(t.root));
+  
+  // Update version and timestamp
+  globalStore.version++;
+  globalStore.lastUpdate = new Date().toISOString();
 };
 
 // --- EDR Pipeline Simulator ---
@@ -35,20 +41,48 @@ export const killProcess = (pid: number) => {
 // 1. Process Growth & Telemetry Dispatcher
 setInterval(() => {
   // A. Retirement Logic: Remove very old or too large trees to keep the system moving
+  const treesToRetire: string[] = [];
   globalStore.trees = globalStore.trees.filter(tree => {
     const nodeCount = (n: ProcessNode): number => 1 + (n.children?.reduce((acc, c) => acc + nodeCount(c), 0) ?? 0);
     const count = nodeCount(tree.root);
     const ageMs = Date.now() - new Date(tree.root.timestamp).getTime();
     
+    let shouldRetire = false;
+    let retirementReason = '';
+    
     // Auto-retire if too large (> 15 nodes) or too old (> 2 minutes)
-    // This allows new trees to be re-seeded
-    if (count > 15 || ageMs > 120000) return false;
+    if (count > 15) {
+      shouldRetire = true;
+      retirementReason = 'size_limit';
+    } else if (ageMs > 120000) {
+      shouldRetire = true;
+      retirementReason = 'age_limit';
+    } else if (!tree.is_suspicious && Math.random() < 0.05) {
+      // Small random chance to retire normal trees early
+      shouldRetire = true;
+      retirementReason = 'random_early';
+    }
     
-    // Small random chance to retire normal trees early
-    if (!tree.is_suspicious && Math.random() < 0.05) return false;
+    if (shouldRetire) {
+      treesToRetire.push(tree.tree_id);
+      // Emit retirement event for frontend synchronization with detailed info
+      edrEvents.emit('tree_retired', {
+        tree_id: tree.tree_id,
+        reason: retirementReason,
+        timestamp: new Date().toISOString(),
+        age_ms: ageMs,
+        node_count: count
+      });
+    }
     
-    return true;
+    return !shouldRetire;
   });
+
+  // Update version if trees were retired
+  if (treesToRetire.length > 0) {
+    globalStore.version++;
+    globalStore.lastUpdate = new Date().toISOString();
+  }
 
   // B. Random Chance to Re-Seed if trees are low
   if (globalStore.trees.length < 6) {
@@ -68,6 +102,10 @@ setInterval(() => {
      };
      randomizePids(newTree.root);
      globalStore.trees.push(newTree);
+     
+     // Update version for new tree
+     globalStore.version++;
+     globalStore.lastUpdate = new Date().toISOString();
      
      // Dispatch Root execution event
      edrEvents.emit('process_exec', {
@@ -115,6 +153,10 @@ setInterval(() => {
       timestamp: new Date().toISOString()
     };
     parent.children.push(newNode);
+
+    // Update version for tree growth
+    globalStore.version++;
+    globalStore.lastUpdate = new Date().toISOString();
 
     edrEvents.emit('process_exec', {
         event_id: `ev-${Date.now()}`,

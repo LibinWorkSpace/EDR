@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { Filter, TerminalIcon, Activity, Database } from "lucide-react";
+import { useState } from "react";
+import { TerminalIcon, Activity, Database } from "lucide-react";
 import { useEDRStore } from "../store/edrStore";
 import type { EventType } from "../types/edr";
 

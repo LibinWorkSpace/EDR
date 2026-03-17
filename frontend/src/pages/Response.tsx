@@ -1,72 +1,20 @@
 import { useEffect, useState } from "react";
 import { Terminal, ShieldAlert, Crosshair, WifiOff, BellRing, CheckCircle2 } from "lucide-react";
 import { useEDRStore } from "../store/edrStore";
-import { postResponseAction, fetchActionLog, fetchDetections } from "../api/client";
-import type { Alert, ResponseAction, DetectionResult } from "../types/edr";
+import { postResponseAction, fetchActionLog } from "../api/client";
+import type { Alert, ResponseAction } from "../types/edr";
 
 export const Response = () => {
-  const { alerts, addAlert, dismissAlert, actionLog, addAction } = useEDRStore();
+  const { alerts, dismissAlert, actionLog, addAction } = useEDRStore();
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
 
-  // Sync alerts from live detections
+  // Debug logging for alert count changes
+  const activeAlerts = alerts.filter(a => !a.resolved);
   useEffect(() => {
-    let isMounted = true;
-    const syncAlerts = async () => {
-      try {
-        const detections = await fetchDetections();
-        if (!isMounted) return;
-        
-        const currentAlerts = useEDRStore.getState().alerts;
-        
-        // 1. Handle Additions/Updates
-        detections.forEach((det: DetectionResult) => {
-          if (det.is_anomalous) {
-            const existingAlert = currentAlerts.find(a => a.tree_id === det.tree_id);
-            if (!existingAlert) {
-              addAlert({
-                id: `alert-${det.tree_id}-${Date.now()}`,
-                tree_id: det.tree_id,
-                label: det.label,
-                pid: det.root_pid,
-                anomaly_score: det.anomaly_score,
-                timestamp: new Date().toISOString(),
-                severity: det.anomaly_score > 0.8 ? "CRITICAL" : "HIGH",
-                resolved: false,
-              });
-            } else {
-              // Update score if it changed significantly
-              if (Math.abs(existingAlert.anomaly_score - det.anomaly_score) > 0.05) {
-                // (Score update logic could go here, but for now we'll just let it be)
-              }
-            }
-          }
-        });
+    console.log(`[Response] Active alerts count: ${activeAlerts.length}`);
+  }, [activeAlerts.length]);
 
-        // 2. Handle Removals (if tree is gone or no longer anomalous)
-        currentAlerts.forEach(alert => {
-          if (!alert.resolved) {
-            const stillAnomalous = detections.find(d => d.tree_id === alert.tree_id && d.is_anomalous);
-            if (!stillAnomalous) {
-              // Optionally resolve it automatically
-              dismissAlert(alert.id);
-            }
-          }
-        });
-
-      } catch (err) {
-        console.error("Failed to sync alerts:", err);
-      }
-    };
-
-    syncAlerts();
-    const interval = setInterval(syncAlerts, 2000);
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
-  }, [addAlert, dismissAlert]);
-
-  // Fetch historical actions
+  // Centralized alert management - removed from Response page to prevent conflicts
   useEffect(() => {
     // Clear any potentially stale alerts from previous sessions on mount
     useEDRStore.setState({ alerts: [] });
@@ -94,7 +42,6 @@ export const Response = () => {
     }
   };
 
-  const activeAlerts = alerts.filter(a => !a.resolved);
   const resolvedAlerts = alerts.filter(a => a.resolved);
 
   return (

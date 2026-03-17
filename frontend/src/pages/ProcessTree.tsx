@@ -1,11 +1,10 @@
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import { useEffect, useState } from "react";
 import ReactFlow, { Background, Controls, BackgroundVariant, Handle, Position } from "reactflow";
 import type { Node, Edge } from "reactflow";
 import "reactflow/dist/style.css";
 import { GitMerge, ShieldAlert } from "lucide-react";
 import { useEDRStore } from "../store/edrStore";
-import { fetchProcessTrees } from "../api/client";
-import type { ProcessTree as ProcessTreeType, ProcessNode } from "../types/edr";
+import type { ProcessNode } from "../types/edr";
 
 // Custom node component for cyber theme
 const CyberNode = ({ data }: any) => {
@@ -43,43 +42,40 @@ const TerminalIcon = ({ className, size }: any) => (
   </svg>
 );
 
+// Move nodeTypes outside component to prevent recreation
 const nodeTypes = { cyberNode: CyberNode };
 
 export const ProcessTree = () => {
-  const { processTrees, setProcessTrees, activeTree, setActiveTree } = useEDRStore();
+  const { processTrees, activeTree, setActiveTree, isStreaming } = useEDRStore();
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Load trees dynamically
+  // Ensure processTrees is always an array
+  const safeProcessTrees = Array.isArray(processTrees) ? processTrees : [];
+
+  // Load trees dynamically - rely on global sync from TopBar
   useEffect(() => {
-    let isMounted = true;
-    const loadT = () => {
-      fetchProcessTrees().then(trees => {
-        if (!isMounted) return;
-        setProcessTrees(trees);
-        // ActiveTree should refer to the zustand state getter to avoid closure issues
-        const currentActive = useEDRStore.getState().activeTree;
-        if (trees.length > 0 && !currentActive) {
-          useEDRStore.getState().setActiveTree(trees[0].tree_id);
-        }
-        setLoading(false);
-      });
-    };
+    if (!isStreaming) {
+      // Clear data when streaming is stopped
+      setActiveTree(null);
+      setLoading(false);
+      return;
+    }
+
+    // Set active tree if none selected and we have trees
+    if (safeProcessTrees.length > 0 && !activeTree) {
+      setActiveTree(safeProcessTrees[0].tree_id);
+    }
     
-    loadT();
-    const interval = setInterval(loadT, 2000);
-    return () => {
-      isMounted = false;
-      clearInterval(interval);
-    };
-  }, []); // Remove dependencies to prevent loop restarts
+    setLoading(false);
+  }, [isStreaming, safeProcessTrees, activeTree, setActiveTree]);
 
   // Transform raw tree into React Flow nodes/edges
   useEffect(() => {
-    if (!activeTree || processTrees.length === 0) return;
+    if (!activeTree || safeProcessTrees.length === 0) return;
 
-    const treeData = processTrees.find(t => t.tree_id === activeTree);
+    const treeData = safeProcessTrees.find(t => t.tree_id === activeTree);
     if (!treeData) return;
 
     const newNodes: Node[] = [];
@@ -121,7 +117,19 @@ export const ProcessTree = () => {
     processNode(treeData.root, 400, yOffset, true);
     setNodes(newNodes);
     setEdges(newEdges);
-  }, [activeTree, processTrees]);
+  }, [activeTree, safeProcessTrees]);
+
+  if (!isStreaming) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center space-y-6">
+        <div className="text-center">
+          <GitMerge className="text-gray-600 mx-auto mb-4" size={64} />
+          <h2 className="text-2xl font-mono text-gray-400 mb-2">PROCESS GRAPH OFFLINE</h2>
+          <p className="text-gray-500 font-mono text-sm">Click "START STREAM" to visualize process trees</p>
+        </div>
+      </div>
+    );
+  }
 
   if (loading) return <div className="text-cyber-accent font-mono p-10">LOADING MEMORY FORENSICS...</div>;
 
@@ -134,7 +142,7 @@ export const ProcessTree = () => {
         </div>
         
         <div className="flex space-x-2">
-          {processTrees.map(t => (
+          {safeProcessTrees.map(t => (
             <button
               key={t.tree_id}
               onClick={() => setActiveTree(t.tree_id)}

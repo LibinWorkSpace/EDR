@@ -40,3 +40,9 @@ export const fetchActionLog = async (): Promise<ActionLog[]> => {
   const data = await res.json();
   return data.actions;
 };
+
+export const fetchRetirements = async (): Promise<Array<{tree_id: string, reason: string, timestamp: string}>> => {
+  const res = await fetch(`${API_BASE}/retirement`);
+  if (!res.ok) throw new Error("Failed to fetch tree retirements");
+  return await res.json();
+};
